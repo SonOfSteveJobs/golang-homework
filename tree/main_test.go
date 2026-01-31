@@ -5,8 +5,7 @@ import (
 	"testing"
 )
 
-const testFullResult = `
-├───project
+const testFullResult = `├───project
 │	├───file.txt (19b)
 │	└───gopher.png (70372b)
 ├───static
