@@ -52,18 +52,35 @@ func ExecutePipeline(jobs ...job) {
 }
 
 func SingleHash(in, out chan interface{}) {
-	var wg sync.WaitGroup
+	var wg1 sync.WaitGroup
+	var wg2 sync.WaitGroup
+
+	crc32results := make([]string, 0)
+	md5results := make([]string, 0)
 
 	for result := range in {
-		wg.Add(1)
+		md5Hash := DataSignerMd5(convertToString(result))
+
+		wg1.Add(1)
 		go func(result interface{}) {
-			defer wg.Done()
+			defer wg1.Done()
 			hash := DataSignerCrc32(convertToString(result))
-			out <- hash
-			fmt.Printf("SingleHash: %v\n", hash)
+			crc32results = append(crc32results, hash)
+		}(result)
+
+		wg2.Add(1)
+		go func(result interface{}) {
+			defer wg2.Done()
+			hash := DataSignerCrc32(md5Hash)
+			md5results = append(md5results, hash)
 		}(result)
 	}
-	wg.Wait()
+	wg1.Wait()
+	wg2.Wait()
+
+	for i := 0; i < len(md5results); i++ {
+		out <- crc32results[i] + "~" + md5results[i]
+	}
 }
 
 func MultiHash(in, out chan interface{}) {
