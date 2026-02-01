@@ -2,12 +2,13 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 )
 
 // сюда писать код
-// сохранил типизацию сигнатур функций как в тестах. Если бы я писал сам - типизировал бы каналы и добавил возвращаемые значения (вроде как каждая из функций может упасть с ошибкой).
+// сохранил типизацию сигнатур функций как в тестах. Если бы я писал сам - типизировал бы каналы и добавил возвращаемые значения.
 func main() {
 	inputData := []int{0, 1, 1, 2, 3, 5, 8}
 
@@ -51,21 +52,41 @@ func ExecutePipeline(jobs ...job) {
 }
 
 func SingleHash(in, out chan interface{}) {
+	var wg sync.WaitGroup
+
 	for result := range in {
-		out <- result
-		fmt.Printf("SingleHash: %d\n", result)
+		wg.Add(1)
+		go func(result interface{}) {
+			defer wg.Done()
+			hash := DataSignerCrc32(convertToString(result))
+			out <- hash
+			fmt.Printf("SingleHash: %v\n", hash)
+		}(result)
 	}
+	wg.Wait()
 }
 
 func MultiHash(in, out chan interface{}) {
 	for result := range in {
 		out <- result
-		fmt.Printf("MultiHash: %d\n", result)
+		fmt.Printf("MultiHash: %v\n", result)
 	}
 }
 
 func CombineResults(in, out chan interface{}) {
 	for result := range in {
-		fmt.Printf("CombineResults: %d\n", result)
+		fmt.Printf("CombineResults: %v\n", result)
+	}
+}
+
+func convertToString(value interface{}) string {
+	switch v := value.(type) {
+	case int:
+		return strconv.Itoa(v)
+	case string:
+		return v
+	default:
+		//панику кидаю потому что наша программа вообще не предусматривает ошибки
+		panic("unknown type")
 	}
 }
