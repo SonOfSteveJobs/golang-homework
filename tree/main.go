@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 func main() {
@@ -21,112 +20,71 @@ func main() {
 	}
 }
 
-// решение
 const (
-	INDENT_CONTINUE    = "│\t"
-	INDENT_EMPTY       = "\t"
-	CONNECTOR_LAST     = "└───"
-	CONNECTOR_NOT_LAST = "├───"
+	LINE_PREFIX     = "│\t"
+	TAB_PREFIX      = "\t"
+	NOT_LAST_PREFIX = "├───"
+	LAST_PREFIX     = "└───"
 )
 
-type StackItem struct {
-	pathname   string
-	name       string
-	isLast     bool
-	isDir      bool
-	size       int64
-	indentMask []bool
+func dirTree(out io.Writer, path string, printFiles bool) error {
+	return printTree(out, path, printFiles, "")
 }
 
-func dirTree(out io.Writer, pathname string, printFiles bool) error {
-	stack, err := getChildren(pathname, printFiles, []bool{})
+func printTree(out io.Writer, path string, printFiles bool, indentPrefix string) error {
+	entries, err := os.ReadDir(path)
 	if err != nil {
 		return err
 	}
 
-	for len(stack) > 0 {
-		item := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-		indent := buildIndent(item.indentMask)
-		connector := CONNECTOR_NOT_LAST
-
-		if item.isLast {
-			connector = CONNECTOR_LAST
+	filtered := entries
+	if !printFiles {
+		filtered = make([]os.DirEntry, 0, len(entries))
+		for _, e := range entries {
+			if e.IsDir() {
+				filtered = append(filtered, e)
+			}
 		}
-		name := formatName(item.name, item.isDir, item.size)
+	}
 
-		_, err := out.Write([]byte(indent + connector + name + "\n"))
-		if err != nil {
-			return err
+	for i, entry := range filtered {
+		isLast := i == len(filtered)-1
+
+		var connector string
+		if isLast {
+			connector = LAST_PREFIX
+		} else {
+			connector = NOT_LAST_PREFIX
 		}
 
-		if item.isDir {
-			newMask := append(append([]bool{}, item.indentMask...), item.isLast)
-			children, err := getChildren(item.pathname, printFiles, newMask)
+		name := entry.Name()
+		if !entry.IsDir() {
+			info, err := entry.Info()
 			if err != nil {
 				return err
 			}
-			stack = append(stack, children...)
+			if info.Size() == 0 {
+				name = name + " (empty)"
+			} else {
+				name = fmt.Sprintf("%s (%db)", name, info.Size())
+			}
+		}
+
+		fmt.Fprintf(out, "%s%s%s\n", indentPrefix, connector, name)
+
+		if entry.IsDir() {
+			var nextIndentPrefix string
+			if isLast {
+				nextIndentPrefix = indentPrefix + TAB_PREFIX
+			} else {
+				nextIndentPrefix = indentPrefix + LINE_PREFIX
+			}
+			err := printTree(out, filepath.Join(path, entry.Name()), printFiles, nextIndentPrefix)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
 	return nil
-}
-
-func getChildren(pathname string, printFiles bool, indentMask []bool) ([]StackItem, error) {
-	entries, err := os.ReadDir(pathname)
-	if err != nil {
-		return nil, err
-	}
-
-	filtered := make([]os.DirEntry, 0, len(entries))
-	for _, e := range entries {
-		if e.IsDir() || printFiles {
-			filtered = append(filtered, e)
-		}
-	}
-
-	result := make([]StackItem, 0, len(filtered))
-	for i := len(filtered) - 1; i >= 0; i-- {
-		e := filtered[i]
-		var size int64
-		if !e.IsDir() {
-			info, err := e.Info()
-			if err != nil {
-				return nil, err
-			}
-			size = info.Size()
-		}
-		result = append(result, StackItem{
-			pathname:   filepath.Join(pathname, e.Name()),
-			name:       e.Name(),
-			isLast:     i == len(filtered)-1,
-			isDir:      e.IsDir(),
-			size:       size,
-			indentMask: indentMask,
-		})
-	}
-	return result, nil
-}
-
-func buildIndent(mask []bool) string {
-	var sb strings.Builder
-	for _, parentWasLast := range mask {
-		if parentWasLast {
-			sb.WriteString(INDENT_EMPTY)
-		} else {
-			sb.WriteString(INDENT_CONTINUE)
-		}
-	}
-	return sb.String()
-}
-
-func formatName(name string, isDir bool, size int64) string {
-	if isDir {
-		return name
-	}
-	if size == 0 {
-		return name + " (empty)"
-	}
-	return fmt.Sprintf("%s (%db)", name, size)
 }

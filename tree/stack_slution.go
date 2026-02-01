@@ -1,4 +1,4 @@
-// package main
+package main
 
 // import (
 // 	"fmt"
@@ -22,10 +22,10 @@
 // }
 
 // const (
-// 	INDENT_CONTINUE    = "│\t"
-// 	INDENT_EMPTY       = "\t"
-// 	CONNECTOR_LAST     = "└───"
-// 	CONNECTOR_NOT_LAST = "├───"
+// 	LINE_PREFIX     = "│\t"
+// 	TAB_PREFIX      = "\t"
+// 	NOT_LAST_PREFIX = "├───"
+// 	LAST_PREFIX     = "└───"
 // )
 
 // type StackItem struct {
@@ -47,10 +47,10 @@
 // 		item := stack[len(stack)-1]
 // 		stack = stack[:len(stack)-1]
 // 		indent := buildIndent(item.indentMask)
-// 		connector := CONNECTOR_NOT_LAST
+// 		connector := NOT_LAST_PREFIX
 
 // 		if item.isLast {
-// 			connector = CONNECTOR_LAST
+// 			connector = LAST_PREFIX
 // 		}
 // 		name := formatName(item.name, item.isDir, item.size)
 
@@ -112,9 +112,9 @@
 // 	var sb strings.Builder
 // 	for _, parentWasLast := range mask {
 // 		if parentWasLast {
-// 			sb.WriteString(INDENT_EMPTY)
+// 			sb.WriteString(LINE_PREFIX)
 // 		} else {
-// 			sb.WriteString(INDENT_CONTINUE)
+// 			sb.WriteString(TAB_PREFIX)
 // 		}
 // 	}
 // 	return sb.String()
