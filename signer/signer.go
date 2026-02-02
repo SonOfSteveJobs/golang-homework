@@ -1,36 +1,37 @@
 package main
 
 import (
-	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 )
 
 // сюда писать код
 // сохранил типизацию сигнатур функций как в тестах. Если бы я писал сам - типизировал бы каналы и добавил возвращаемые значения.
-func main() {
-	inputData := []int{0, 1, 1, 2, 3, 5, 8}
 
-	hashSignJobs := []job{
-		job(func(in, out chan interface{}) {
-			for _, fibNum := range inputData {
-				out <- fibNum
-			}
-		}),
-		job(SingleHash),
-		job(MultiHash),
-		job(CombineResults),
-	}
+// для теста:
+// func main() {
+// 	inputData := []int{0, 1, 1, 2, 3, 5, 8}
 
-	start := time.Now()
+// 	hashSignJobs := []job{
+// 		job(func(in, out chan interface{}) {
+// 			for _, fibNum := range inputData {
+// 				out <- fibNum
+// 			}
+// 		}),
+// 		job(SingleHash),
+// 		job(MultiHash),
+// 		job(CombineResults),
+// 	}
 
-	ExecutePipeline(hashSignJobs...)
+// 	start := time.Now()
 
-	end := time.Since(start)
-	fmt.Printf("Execution time: %s\n", end)
-}
+// 	ExecutePipeline(hashSignJobs...)
+
+// 	end := time.Since(start)
+// 	fmt.Printf("Execution time: %s\n", end)
+// }
 
 func ExecutePipeline(jobs ...job) {
 	var wg sync.WaitGroup
@@ -88,32 +89,41 @@ func MultiHash(in, out chan interface{}) {
 
 	for result := range in {
 		wg.Add(1)
-		go func() {
+		go func(result interface{}) {
 			defer wg.Done()
 			var wgInner sync.WaitGroup
 			hashes := make([]string, iterationsPerElement)
 
 			wgInner.Add(iterationsPerElement)
 			for th := 0; th < iterationsPerElement; th++ {
-				go func(th int) {
+				go func(th int, result interface{}) {
 					defer wgInner.Done()
 					hashes[th] = DataSignerCrc32(strconv.Itoa(th) + convertToString(result))
-				}(th)
+				}(th, result)
 			}
 
 			wgInner.Wait()
 			string := strings.Join(hashes, "")
 			out <- string
-		}()
+		}(result)
 	}
 
 	wg.Wait()
 }
 
 func CombineResults(in, out chan interface{}) {
+	results := make([]string, 0)
+
 	for result := range in {
-		fmt.Printf("CombineResults: %v\n", result)
+		results = append(results, convertToString(result))
 	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i] < results[j]
+	})
+
+	resultString := strings.Join(results, "_")
+	out <- resultString
 }
 
 func convertToString(value interface{}) string {
