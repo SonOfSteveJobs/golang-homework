@@ -52,35 +52,34 @@ func ExecutePipeline(jobs ...job) {
 }
 
 func SingleHash(in, out chan interface{}) {
-	var wg1 sync.WaitGroup
-	var wg2 sync.WaitGroup
-
-	crc32results := make([]string, 0)
-	md5results := make([]string, 0)
+	var wg sync.WaitGroup
 
 	for result := range in {
 		md5Hash := DataSignerMd5(convertToString(result))
 
-		wg1.Add(1)
+		wg.Add(1)
 		go func(result interface{}) {
-			defer wg1.Done()
-			hash := DataSignerCrc32(convertToString(result))
-			crc32results = append(crc32results, hash)
-		}(result)
+			defer wg.Done()
+			var hashCrc32 string
+			var hashMd5 string
+			var wgInner sync.WaitGroup
 
-		wg2.Add(1)
-		go func(result interface{}) {
-			defer wg2.Done()
-			hash := DataSignerCrc32(md5Hash)
-			md5results = append(md5results, hash)
+			wgInner.Add(2)
+			go func() {
+				defer wgInner.Done()
+				hashCrc32 = DataSignerCrc32(convertToString(result))
+			}()
+			go func() {
+				defer wgInner.Done()
+				hashMd5 = DataSignerCrc32(md5Hash)
+			}()
+			wgInner.Wait()
+
+			out <- hashCrc32 + "~" + hashMd5
+
 		}(result)
 	}
-	wg1.Wait()
-	wg2.Wait()
-
-	for i := 0; i < len(md5results); i++ {
-		out <- crc32results[i] + "~" + md5results[i]
-	}
+	wg.Wait()
 }
 
 func MultiHash(in, out chan interface{}) {
