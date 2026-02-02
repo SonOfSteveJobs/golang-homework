@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -76,17 +77,37 @@ func SingleHash(in, out chan interface{}) {
 			wgInner.Wait()
 
 			out <- hashCrc32 + "~" + hashMd5
-
 		}(result)
 	}
 	wg.Wait()
 }
 
 func MultiHash(in, out chan interface{}) {
+	const iterationsPerElement = 6
+	var wg sync.WaitGroup
+
 	for result := range in {
-		out <- result
-		fmt.Printf("MultiHash: %v\n", result)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var wgInner sync.WaitGroup
+			hashes := make([]string, iterationsPerElement)
+
+			wgInner.Add(iterationsPerElement)
+			for th := 0; th < iterationsPerElement; th++ {
+				go func(th int) {
+					defer wgInner.Done()
+					hashes[th] = DataSignerCrc32(strconv.Itoa(th) + convertToString(result))
+				}(th)
+			}
+
+			wgInner.Wait()
+			string := strings.Join(hashes, "")
+			out <- string
+		}()
 	}
+
+	wg.Wait()
 }
 
 func CombineResults(in, out chan interface{}) {
@@ -102,7 +123,7 @@ func convertToString(value interface{}) string {
 	case string:
 		return v
 	default:
-		//панику кидаю потому что наша программа вообще не предусматривает ошибки
+		//панику кидаю потому что наша программа вообще не предусматривает ошибки (?)
 		panic("unknown type")
 	}
 }
