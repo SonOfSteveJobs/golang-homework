@@ -1,22 +1,22 @@
+// CPU:
+//
+//	go test -bench=BenchmarkFast -cpuprofile=cpu.out
+//	go tool pprof -http=:8083 cpu.out
+//
+// Memory:
+//
+//	go test -bench=BenchmarkFast -memprofile=mem.out
+//	go tool pprof -http=:8084 mem.out
 package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
+	"hw3/user"
 	"io"
 	"os"
 	"strings"
 )
-
-type User struct {
-	Name          string   `json:"name"`
-	Email         string   `json:"email"`
-	Browsers      []string `json:"browsers"`
-	Index         int
-	IsAndroidUser bool
-	IsMSIEUser    bool
-}
 
 // вам надо написать более быструю оптимальную этой функции
 func FastSearch(out io.Writer) {
@@ -42,30 +42,30 @@ func FastSearch(out io.Writer) {
 
 	currentLineIndex := 0
 	for scanner.Scan() {
-		line := scanner.Text()
+		line := scanner.Bytes()
 
-		var currentUser User
-		err := json.Unmarshal([]byte(line), &currentUser)
-		if err != nil {
-			panic(err)
-		}
+		var currentUser user.User
+		currentUser.UnmarshalJSON(line)
+
+		isAndroid := false
+		isMSIE := false
 
 		for _, browser := range currentUser.Browsers {
 			if strings.Contains(browser, "Android") {
-				currentUser.IsAndroidUser = true
+				isAndroid = true
 				if _, ok := seenBrowsersSet[browser]; !ok {
 					seenBrowsersSet[browser] = struct{}{}
 				}
 			}
 			if strings.Contains(browser, "MSIE") {
-				currentUser.IsMSIEUser = true
+				isMSIE = true
 				if _, ok := seenBrowsersSet[browser]; !ok {
 					seenBrowsersSet[browser] = struct{}{}
 				}
 			}
 		}
 
-		if currentUser.IsAndroidUser && currentUser.IsMSIEUser {
+		if isAndroid && isMSIE {
 			replacedEmail := strings.ReplaceAll(currentUser.Email, "@", " [at] ")
 			fmt.Fprintf(&usersSb, "[%d] %s <%s>\n", currentLineIndex, currentUser.Name, replacedEmail)
 		}
