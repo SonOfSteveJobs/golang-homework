@@ -1,3 +1,11 @@
+// CPU:
+//   go test -bench=BenchmarkSlow -cpuprofile=cpu.out
+//   go tool pprof -http=:8083 cpu.out
+//
+// Memory:
+//   go test -bench=BenchmarkSlow -memprofile=mem.out
+//   go tool pprof -http=:8084 mem.out
+
 package main
 
 import (

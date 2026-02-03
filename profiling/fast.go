@@ -13,6 +13,8 @@ func FastSearch(out io.Writer) {
 		так же обратите внимание на команду в параметром -http
 		перечитайте еще раз задание
 		!!! !!! !!!
+
+		ОТЧЕТ В report.md ЕСЛИ ЧЕ
 	*/
 	SlowSearch(out)
 }
