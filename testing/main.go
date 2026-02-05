@@ -4,9 +4,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
-	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"sort"
 	"strconv"
@@ -164,27 +162,4 @@ func SearchServerHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-}
-
-func main() {
-	server := httptest.NewServer(http.HandlerFunc(SearchServerHandler))
-	defer server.Close()
-
-	client := &SearchClient{
-		URL:         server.URL,
-		AccessToken: "12345",
-	}
-
-	res, err := client.FindUsers(SearchRequest{
-		OrderField: "",
-		OrderBy:    2,
-		Limit:      25,
-		Query:      "",
-		Offset:     25,
-	})
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	fmt.Printf("%+v\n", res)
 }
