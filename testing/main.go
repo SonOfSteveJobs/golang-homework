@@ -1,11 +1,15 @@
 package main
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -33,8 +37,8 @@ func isValidDirection(d int) bool {
 	}
 }
 
-var ErrIncorrectOrderField = errors.New("Incorrect order field: must be one of 'Id', 'Age', or 'Name'")
-var ErrIncorrectDirection = errors.New(ErrorBadOrderField)
+var ErrIncorrectOrderField = errors.New("ErrorBadOrderField")
+var ErrIncorrectDirection = errors.New("OrderBy must be -1, 0, or 1")
 var ErrIncorrectOffset = errors.New("Incorrect offset: must be positive integer")
 
 type UserXML struct {
@@ -119,19 +123,68 @@ func SearchServer(req SearchRequest) ([]User, error) {
 	return users, nil
 }
 
-func main() {
+func SearchServerHandler(w http.ResponseWriter, r *http.Request) {
+	token := r.Header.Get("AccessToken")
+	if token == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	params := r.URL.Query()
+	limit, _ := strconv.Atoi(params.Get("limit"))
+	offset, _ := strconv.Atoi(params.Get("offset"))
+	orderField := params.Get("order_field")
+	orderBy, _ := strconv.Atoi(params.Get("order_by"))
+	query := params.Get("query")
+
 	users, err := SearchServer(SearchRequest{
+		OrderField: orderField,
+		OrderBy:    orderBy,
+		Limit:      limit,
+		Query:      query,
+		Offset:     offset,
+	})
+	w.Header().Set("Content-Type", "application/json")
+
+	encoder := json.NewEncoder(w)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		err = encoder.Encode(SearchErrorResponse{
+			Error: err.Error(),
+		})
+
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	err = encoder.Encode(users)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
+func main() {
+	server := httptest.NewServer(http.HandlerFunc(SearchServerHandler))
+	defer server.Close()
+
+	client := &SearchClient{
+		URL:         server.URL,
+		AccessToken: "12345",
+	}
+
+	res, err := client.FindUsers(SearchRequest{
 		OrderField: "",
-		OrderBy:    OrderByAsc,
-		Limit:      900,
+		OrderBy:    2,
+		Limit:      25,
 		Query:      "",
-		Offset:     100,
+		Offset:     25,
 	})
 	if err != nil {
 		fmt.Println(err)
 	}
 
-	for _, user := range users {
-		fmt.Printf("User: %v\n", user)
-	}
+	fmt.Printf("%+v\n", res)
 }
