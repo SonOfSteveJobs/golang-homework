@@ -18,112 +18,188 @@ import (
 type TestCase struct {
 	ID                string
 	Request           SearchRequest
-	ResponseIds       []int
+	ExpectedIds       []int // id в правильном порядке
+	ExpectedCount     int
+	ExpectedNextPage  bool
 	isErr             bool
 	ErrContainsString string
 }
 
 var testCases = []TestCase{
+	// успешные кейсы
 	{
-		ID: "success",
+		ID: "success basic",
 		Request: SearchRequest{
 			OrderField: "",
-			OrderBy:    1,
+			OrderBy:    OrderByDesc,
 			Limit:      1,
 			Query:      "",
 			Offset:     0,
 		},
-		ResponseIds:       []int{13},
-		isErr:             false,
-		ErrContainsString: "",
+		ExpectedIds:      []int{13},
+		ExpectedCount:    1,
+		ExpectedNextPage: true,
 	},
 	{
-		ID: "success len(data) != req.Limit",
+		ID: "search by Name",
 		Request: SearchRequest{
-			OrderField: "",
-			OrderBy:    1,
-			Limit:      30,
-			Query:      "Boyd Wolf",
-			Offset:     0,
+			Limit: 10,
+			Query: "Boyd Wolf",
 		},
-		ResponseIds: []int{0},
-		isErr:       false,
+		ExpectedIds:      []int{0},
+		ExpectedCount:    1,
+		ExpectedNextPage: false,
 	},
+	{
+		ID: "search in About field",
+		Request: SearchRequest{
+			Limit: 5,
+			Query: "adipisicing",
+		},
+		ExpectedCount:    5,
+		ExpectedNextPage: true,
+	},
+	{
+		ID: "query no results",
+		Request: SearchRequest{
+			Limit: 10,
+			Query: "люблюписатьтесты)",
+		},
+		ExpectedIds:      []int{},
+		ExpectedCount:    0,
+		ExpectedNextPage: false,
+	},
+
+	//сортировка
+	{
+		ID: "sort by Name asc",
+		Request: SearchRequest{
+			OrderField: "Name",
+			OrderBy:    OrderByAsc,
+			Limit:      3,
+		},
+		ExpectedIds:      []int{15, 16, 19},
+		ExpectedCount:    3,
+		ExpectedNextPage: true,
+	},
+	{
+		ID: "sort by Age asc",
+		Request: SearchRequest{
+			OrderField: "Age",
+			OrderBy:    OrderByAsc,
+			Limit:      3,
+		},
+		ExpectedIds:      []int{1, 15, 23},
+		ExpectedCount:    3,
+		ExpectedNextPage: true,
+	},
+	{
+		ID: "sort by Id desc",
+		Request: SearchRequest{
+			OrderField: "Id",
+			OrderBy:    OrderByDesc,
+			Limit:      3,
+		},
+		ExpectedIds:      []int{34, 33, 32},
+		ExpectedCount:    3,
+		ExpectedNextPage: true,
+	},
+	{
+		ID: "OrderByAsIs - no sorting",
+		Request: SearchRequest{
+			OrderField: "Id",
+			OrderBy:    OrderByAsIs,
+			Limit:      3,
+		},
+		ExpectedIds:      []int{0, 1, 2},
+		ExpectedCount:    3,
+		ExpectedNextPage: true,
+	},
+
+	// Limit
+	{
+		ID: "limit capped at 25",
+		Request: SearchRequest{
+			OrderField: "Id",
+			OrderBy:    OrderByAsc,
+			Limit:      100,
+		},
+		ExpectedCount:    25,
+		ExpectedNextPage: true,
+	},
+
+	// Offset
+	{
+		ID: "offset skips records",
+		Request: SearchRequest{
+			OrderField: "Id",
+			OrderBy:    OrderByAsc,
+			Limit:      3,
+			Offset:     5,
+		},
+		ExpectedIds:      []int{5, 6, 7},
+		ExpectedCount:    3,
+		ExpectedNextPage: true,
+	},
+	{
+		ID: "offset near end",
+		Request: SearchRequest{
+			OrderField: "Id",
+			OrderBy:    OrderByAsc,
+			Limit:      10,
+			Offset:     32,
+		},
+		ExpectedIds:      []int{32, 33, 34},
+		ExpectedCount:    3,
+		ExpectedNextPage: false,
+	},
+	{
+		ID: "empty result",
+		Request: SearchRequest{
+			Limit:  10,
+			Offset: 100,
+		},
+		ExpectedIds:      []int{},
+		ExpectedCount:    0,
+		ExpectedNextPage: false,
+	},
+
+	// ошибки
 	{
 		ID: "negative limit",
 		Request: SearchRequest{
-			OrderField: "",
-			OrderBy:    1,
-			Limit:      -1,
-			Query:      "",
-			Offset:     0,
+			Limit: -1,
 		},
-		ResponseIds:       []int{},
 		isErr:             true,
 		ErrContainsString: "limit must be > 0",
 	},
 	{
-		ID: "limit > 25",
-		Request: SearchRequest{
-			OrderField: "",
-			OrderBy:    1,
-			Limit:      30,
-			Query:      "",
-			Offset:     0,
-		},
-		ResponseIds:       []int{13, 33, 18, 26, 9, 27, 31, 4, 14, 20, 7, 25, 34, 21, 6, 1, 10, 24, 8, 11, 23, 3, 17, 30, 12},
-		isErr:             false,
-		ErrContainsString: "",
-	},
-	{
 		ID: "negative offset",
 		Request: SearchRequest{
-			OrderField: "",
-			OrderBy:    1,
-			Limit:      30,
-			Query:      "",
-			Offset:     -1,
+			Limit:  10,
+			Offset: -1,
 		},
-		ResponseIds:       []int{},
 		isErr:             true,
 		ErrContainsString: "offset must be > 0",
 	},
 	{
-		ID: "incorrect order by",
+		ID: "invalid order by",
 		Request: SearchRequest{
-			OrderField: "",
-			OrderBy:    2,
-			Limit:      30,
-			Query:      "",
-			Offset:     0,
+			OrderBy: 2,
+			Limit:   10,
 		},
-		ResponseIds:       []int{},
 		isErr:             true,
-		ErrContainsString: "unknown bad request error: OrderBy must be -1, 0, or 1",
+		ErrContainsString: "unknown bad request error",
 	},
 	{
-		ID: "incorrect order field",
+		ID: "invalid order field",
 		Request: SearchRequest{
-			OrderField: "12345",
-			OrderBy:    1,
-			Limit:      30,
-			Query:      "",
-			Offset:     0,
+			OrderField: "InvalidField",
+			Limit:      10,
 		},
-		ResponseIds:       []int{},
 		isErr:             true,
-		ErrContainsString: "OrderFeld 12345 invalid",
+		ErrContainsString: "OrderFeld InvalidField invalid",
 	},
-}
-
-// надо так как старая версия го не содержит функцию slices.Contains
-func contains(slice []int, val int) bool {
-	for _, v := range slice {
-		if v == val {
-			return true
-		}
-	}
-	return false
 }
 
 func TestSearchServer(t *testing.T) {
@@ -138,30 +214,40 @@ func TestSearchServer(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.ID, func(t *testing.T) {
 			res, err := client.FindUsers(tc.Request)
-			if err != nil && !tc.isErr {
-				t.Errorf("expected no error, got: %v", err)
-				return
-			}
 
 			if tc.isErr {
-				if nil == err {
-					t.Error("expected error, got nil")
-					return
+				if err == nil {
+					t.Errorf("expected error, got nil")
 				}
 				if !strings.Contains(err.Error(), tc.ErrContainsString) {
-					t.Errorf("expected error: %v, got: %v", tc.ErrContainsString, err.Error())
+					t.Errorf("expected error containing %q, got: %v", tc.ErrContainsString, err.Error())
 				}
 				return
 			}
 
-			// users := []int{}
-			for _, user := range res.Users {
-				// users = append(users, user.Id)
-				if !contains(tc.ResponseIds, user.Id) {
-					t.Errorf("expected user id(s): %v, failed id: %d", tc.ResponseIds, user.Id)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+
+			if len(res.Users) != tc.ExpectedCount {
+				t.Errorf("expected %d users, got %d", tc.ExpectedCount, len(res.Users))
+			}
+
+			if res.NextPage != tc.ExpectedNextPage {
+				t.Errorf("expected NextPage=%v, got %v", tc.ExpectedNextPage, res.NextPage)
+			}
+
+			if len(tc.ExpectedIds) > 0 {
+				if len(res.Users) != len(tc.ExpectedIds) {
+					t.Errorf("expected %d users, got %d", len(tc.ExpectedIds), len(res.Users))
+					return
+				}
+				for i, user := range res.Users {
+					if user.Id != tc.ExpectedIds[i] {
+						t.Errorf("position %d: expected id %d, got %d", i, tc.ExpectedIds[i], user.Id)
+					}
 				}
 			}
-			// t.Logf("%+v", users)
 		})
 	}
 }
