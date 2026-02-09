@@ -41,26 +41,10 @@ func NewDbExplorer(db *sql.DB) (http.Handler, error) {
 			return nil, err
 		}
 
-		columns, err := db.Query("SHOW FULL COLUMNS FROM `" + tableName + "`")
+		columnsSlice, err := loadColumns(db, tableName)
 		if err != nil {
 			return nil, err
 		}
-
-		var columnsSlice []Column
-		for columns.Next() {
-			col := Column{}
-			var skip interface{}
-
-			err := columns.Scan(&col.Name, &col.Type, &skip, &col.Nullable, &col.IsPrimaryKey, &col.HasDefaultValue, &skip, &skip, &skip) //всегда 9 колонок
-			if err != nil {
-				return nil, err
-			}
-			fmt.Printf("column: %v\n", col)
-
-			columnsSlice = append(columnsSlice, col)
-		}
-		columns.Close()
-
 		tablesMap[tableName] = columnsSlice
 	}
 
@@ -68,4 +52,48 @@ func NewDbExplorer(db *sql.DB) (http.Handler, error) {
 		DB:     db,
 		Tables: tablesMap,
 	}, nil
+}
+
+func loadColumns(db *sql.DB, tableName string) ([]Column, error) {
+	//Задание говорит использовать SHOW FULL COLUMNS, но мне плохо от записи columns.Scan(&col.Name, &col.Type, &skip, &col.Nullable, &col.IsPrimaryKey, &col.HasDefaultValue, &skip, &skip, &skip)
+	const query = `
+SELECT
+  COLUMN_NAME,
+  COLUMN_TYPE,
+  IS_NULLABLE,
+  COLUMN_KEY,
+  COLUMN_DEFAULT
+FROM information_schema.columns
+WHERE table_schema = DATABASE() AND table_name = ?
+ORDER BY ORDINAL_POSITION;
+`
+
+	columns, err := db.Query(query, tableName)
+	if err != nil {
+		return nil, err
+	}
+	defer columns.Close()
+
+	var columnsSlice []Column
+	for columns.Next() {
+		var col Column
+		err := columns.Scan(
+			&col.Name,
+			&col.Type,
+			&col.Nullable,
+			&col.IsPrimaryKey,
+			&col.HasDefaultValue,
+		)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Printf("col %v\n", col)
+
+		columnsSlice = append(columnsSlice, col)
+	}
+	if columns.Err() != nil {
+		return nil, err
+	}
+
+	return columnsSlice, nil
 }
