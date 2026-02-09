@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/http"
 )
@@ -22,7 +23,31 @@ type Column struct {
 }
 
 func (d *DBInfo) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+	method := r.Method
+	fmt.Println("PATH:", path, "METHOD:", method)
 
+	if method == http.MethodGet && path == "/" {
+		tableNames := make([]string, 0, len(d.Tables))
+		for tableName := range d.Tables {
+			tableNames = append(tableNames, tableName)
+		}
+
+		resMap := map[string]interface{}{
+			"response": map[string]interface{}{
+				"tables": tableNames,
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resMap)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(d.Tables)
 }
 
 func NewDbExplorer(db *sql.DB) (http.Handler, error) {
@@ -97,7 +122,6 @@ ORDER BY ORDINAL_POSITION;
 		if err != nil {
 			return nil, err
 		}
-		fmt.Printf("col %v\n", col)
 
 		columnsSlice = append(columnsSlice, col)
 	}
