@@ -38,14 +38,24 @@ func NewDbExplorer(db *sql.DB) (http.Handler, error) {
 		err := rows.Scan(&tableName)
 
 		if err != nil {
+			rows.Close()
 			return nil, err
 		}
+		// хз можно ли так писать, делаю чтобы не создавать промежуточные структуры, например слайс с именами
+		tablesMap[tableName] = nil
+	}
 
-		columnsSlice, err := loadColumns(db, tableName)
+	if rows.Err() != nil {
+		rows.Close()
+		return nil, rows.Err()
+	}
+
+	for key, _ := range tablesMap {
+		columnsSlice, err := loadColumns(db, key)
 		if err != nil {
 			return nil, err
 		}
-		tablesMap[tableName] = columnsSlice
+		tablesMap[key] = columnsSlice
 	}
 
 	return &DBInfo{
@@ -92,7 +102,7 @@ ORDER BY ORDINAL_POSITION;
 		columnsSlice = append(columnsSlice, col)
 	}
 	if columns.Err() != nil {
-		return nil, err
+		return nil, columns.Err()
 	}
 
 	return columnsSlice, nil

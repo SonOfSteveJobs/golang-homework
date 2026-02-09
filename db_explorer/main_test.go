@@ -98,7 +98,6 @@ func TestApis(t *testing.T) {
 	defer CleanupTestApis(db)
 
 	handler, err := NewDbExplorer(db)
-	t.Logf("db: %v", db)
 	if err != nil {
 		panic(err)
 	}
