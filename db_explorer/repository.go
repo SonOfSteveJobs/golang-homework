@@ -173,6 +173,18 @@ func (repo *Repository) GetTableRecords(ctx context.Context, tableName string, i
 	return records, nil
 }
 
+func (repo *Repository) CreateTableRecord(ctx context.Context, tableName string, body map[string]interface{}) (int64, error) {
+	return 0, nil
+}
+
+func (repo *Repository) UpdateTableRecord(ctx context.Context, tableName string, id int, body map[string]interface{}) (int64, error) {
+	return 0, nil
+}
+
+func (repo *Repository) DeleteTableRecord(ctx context.Context, tableName string, id int) (int64, error) {
+	return 0, nil
+}
+
 func loadColumns(db *sql.DB, tableName string) ([]Column, error) {
 	//Задание говорит использовать SHOW FULL COLUMNS, но мне плохо от записи columns.Scan(&col.Name, &col.Type, &skip, &col.Nullable, &col.IsPrimaryKey, &col.HasDefaultValue, &skip, &skip, &skip)
 	const query = `
