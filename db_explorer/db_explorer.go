@@ -32,8 +32,6 @@ func (d *DBInfo) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	method := r.Method
 	// params := r.URL.Query().Get("limit")
 
-	tableNames := d.GetTables()
-
 	if path == "/" {
 		if method != http.MethodGet {
 			resMap := ResMap{
@@ -42,6 +40,7 @@ func (d *DBInfo) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			createJSONResponse(w, http.StatusBadRequest, resMap)
 			return
 		}
+		tableNames := d.GetTables()
 
 		resMap := ResMap{
 			"response": ResMap{
@@ -83,7 +82,8 @@ func (d *DBInfo) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !slices.Contains(tableNames, table) {
+	_, ok := d.Tables[table]
+	if !ok {
 		resMap := ResMap{
 			"error": "unknown table",
 		}
@@ -146,13 +146,13 @@ func (d *DBInfo) getTableRecords(tableName string, id int) ([]ResMap, error) {
 	}
 	var records []ResMap
 
-	for rows.Next() {
-		values := make([]interface{}, len(columns))
-		valuePtrs := make([]interface{}, len(columns))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
+	values := make([]interface{}, len(columns))
+	valuePtrs := make([]interface{}, len(columns))
+	for i := range values {
+		valuePtrs[i] = &values[i]
+	}
 
+	for rows.Next() {
 		err := rows.Scan(valuePtrs...)
 		if err != nil {
 			return nil, err
@@ -161,7 +161,6 @@ func (d *DBInfo) getTableRecords(tableName string, id int) ([]ResMap, error) {
 		record := make(ResMap, len(columns))
 		for i, colName := range columns {
 			val := values[i]
-			record[colName] = val
 
 			b, ok := val.([]byte)
 			if ok {
@@ -175,7 +174,10 @@ func (d *DBInfo) getTableRecords(tableName string, id int) ([]ResMap, error) {
 					}
 				}
 				record[colName] = string(b)
+				continue
 			}
+
+			record[colName] = val
 		}
 		records = append(records, record)
 	}
@@ -199,7 +201,6 @@ func NewDbExplorer(db *sql.DB) (http.Handler, error) {
 		err := rows.Scan(&tableName)
 
 		if err != nil {
-			rows.Close()
 			return nil, err
 		}
 		// хз можно ли так писать, делаю чтобы не создавать промежуточные структуры, например слайс с именами
@@ -207,7 +208,6 @@ func NewDbExplorer(db *sql.DB) (http.Handler, error) {
 	}
 
 	if rows.Err() != nil {
-		rows.Close()
 		return nil, rows.Err()
 	}
 
