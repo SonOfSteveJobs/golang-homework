@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -90,7 +89,7 @@ func (repo *Repository) GetTableNames() []string {
 	return tableNames
 }
 
-func (repo *Repository) GetTableRecords(ctx context.Context, tableName string, id int) ([]ResMap, error) {
+func (repo *Repository) GetTableRecords(ctx context.Context, tableName string, id, limit, offset int) ([]ResMap, error) {
 	_, ok := repo.tables[tableName]
 	if !ok {
 		return nil, errors.New("unknown table")
@@ -98,19 +97,29 @@ func (repo *Repository) GetTableRecords(ctx context.Context, tableName string, i
 
 	schema := repo.tables[tableName]
 
-	var (
-		rows *sql.Rows
-		err  error
-	)
+	var sb strings.Builder
+	sb.WriteString("SELECT * FROM `")
+	sb.WriteString(tableName)
+	sb.WriteString("`")
+
+	args := make([]interface{}, 0, 3)
 
 	if id > 0 {
-		query := fmt.Sprintf("SELECT * FROM `%s` WHERE id = ?", tableName)
-		rows, err = repo.db.QueryContext(ctx, query, id)
-	} else {
-		query := fmt.Sprintf("SELECT * FROM `%s`", tableName)
-		rows, err = repo.db.QueryContext(ctx, query)
+		sb.WriteString(" WHERE id = ?")
+		args = append(args, id)
 	}
 
+	if limit > 0 {
+		sb.WriteString(" LIMIT ?")
+		args = append(args, limit)
+	}
+
+	if offset > 0 {
+		sb.WriteString(" OFFSET ?")
+		args = append(args, offset)
+	}
+
+	rows, err := repo.db.QueryContext(ctx, sb.String(), args...)
 	if err != nil {
 		return nil, err
 	}

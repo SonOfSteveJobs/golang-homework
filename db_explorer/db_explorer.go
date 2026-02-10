@@ -14,9 +14,17 @@ type DBInfo struct {
 
 type ResMap map[string]interface{}
 
+type TableRecordsReq struct {
+	TableName string
+	Id        string
+	Limit     string
+	Offset    string
+}
+
 func (d *DBInfo) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
-	// params := r.URL.Query().Get("limit")
+	limit := r.URL.Query().Get("limit")
+	offset := r.URL.Query().Get("offset")
 
 	if path == "/" {
 		d.HandleGetTables(w, r)
@@ -24,14 +32,21 @@ func (d *DBInfo) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pathSegments := strings.Split(path, "/")
-	switch len(pathSegments) {
-	case 2:
-		d.HandleTableRecords(w, r, pathSegments[1], "")
-	case 3:
-		d.HandleTableRecords(w, r, pathSegments[1], pathSegments[2])
-	default:
+	if len(pathSegments) < 2 {
 		writeJSONError(w, http.StatusBadRequest, "invalid path")
+		return
 	}
+
+	tableRecordsReq := TableRecordsReq{
+		TableName: pathSegments[1],
+		Id:        "",
+		Limit:     limit,
+		Offset:    offset,
+	}
+	if len(pathSegments) >= 3 {
+		tableRecordsReq.Id = pathSegments[2]
+	}
+	d.HandleTableRecords(w, r, tableRecordsReq)
 }
 
 func NewDbExplorer(db *sql.DB) (http.Handler, error) {

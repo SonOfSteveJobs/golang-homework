@@ -24,31 +24,71 @@ func (d *DBInfo) HandleGetTables(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, ResMap{"tables": tableNames})
 }
 
-func (d *DBInfo) HandleTableRecords(w http.ResponseWriter, r *http.Request, table string, idStr string) {
-	if !d.Repo.HasTable(table) {
+func (d *DBInfo) HandleTableRecords(w http.ResponseWriter, r *http.Request, tableRecordsReq TableRecordsReq) {
+	if !d.Repo.HasTable(tableRecordsReq.TableName) {
 		writeJSONError(w, http.StatusNotFound, "unknown table")
 		return
 	}
 
-	var id int
-	if idStr != "" {
-		idInt, err := strconv.Atoi(idStr)
+	var (
+		id     int
+		limit  int = defaultLimit
+		offset int = defaultOffset
+	)
+
+	if tableRecordsReq.Id != "" {
+		idInt, err := strconv.Atoi(tableRecordsReq.Id)
 		if err != nil || idInt <= 0 {
 			writeJSONError(w, http.StatusBadRequest, "invalid id, must be positive integer")
 			return
 		}
 		id = idInt
 	}
+
+	if tableRecordsReq.Limit != "" {
+		limitInt, err := strconv.Atoi(tableRecordsReq.Limit)
+		if err != nil || limitInt <= 0 {
+			writeJSONError(w, http.StatusBadRequest, "invalid limit, must be positive integer")
+			return
+		}
+		limit = limitInt
+	}
+
+	if tableRecordsReq.Offset != "" {
+		offsetInt, err := strconv.Atoi(tableRecordsReq.Offset)
+		if err != nil || offsetInt < 0 {
+			writeJSONError(w, http.StatusBadRequest, "invalid offset, must be non-negative integer")
+			return
+		}
+		offset = offsetInt
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	records, err := d.Repo.GetTableRecords(ctx, table, id)
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
+	switch r.Method {
+	case http.MethodGet:
+		records, err := d.Repo.GetTableRecords(ctx, tableRecordsReq.TableName, id, limit, offset)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 
-	writeJSON(w, http.StatusOK, ResMap{"records": records})
+		if id > 0 {
+			if len(records) == 1 {
+				writeJSON(w, http.StatusOK, ResMap{"record": records[0]})
+			}
+			if len(records) == 0 {
+				writeJSONError(w, http.StatusNotFound, "record not found")
+			}
+			return
+		}
+
+	case http.MethodPut:
+
+	default:
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed for this endpoint")
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
