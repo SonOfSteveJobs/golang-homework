@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -30,6 +32,7 @@ func (d *DBInfo) HandleTableRecords(w http.ResponseWriter, r *http.Request, req 
 		return
 	}
 
+	//в задании не требудется, но мало ли..
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
@@ -38,7 +41,7 @@ func (d *DBInfo) HandleTableRecords(w http.ResponseWriter, r *http.Request, req 
 		case http.MethodGet:
 			d.HandleGetRecord(ctx, w, req)
 		case http.MethodPost:
-			d.HandleUpdateRecord(ctx, w, req)
+			d.HandleUpdateRecord(ctx, w, req, r.Body)
 		case http.MethodDelete:
 			d.HandleDeleteRecord(ctx, w, req)
 		default:
@@ -51,7 +54,7 @@ func (d *DBInfo) HandleTableRecords(w http.ResponseWriter, r *http.Request, req 
 	case http.MethodGet:
 		d.HandleListRecords(ctx, w, req)
 	case http.MethodPut:
-		d.HandleCreateRecord(ctx, w, req)
+		d.HandleCreateRecord(ctx, w, req, r.Body)
 	default:
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
@@ -91,7 +94,12 @@ func (d *DBInfo) HandleGetRecord(ctx context.Context, w http.ResponseWriter, req
 		return
 	}
 
-	records, err := d.Repo.GetTableRecords(ctx, req.TableName, id, 0, 0)
+	const (
+		limitSkip  = 0
+		offsetSkip = 0
+	)
+
+	records, err := d.Repo.GetTableRecords(ctx, req.TableName, id, limitSkip, offsetSkip)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -105,16 +113,137 @@ func (d *DBInfo) HandleGetRecord(ctx context.Context, w http.ResponseWriter, req
 	writeJSON(w, http.StatusOK, ResMap{"record": records[0]})
 }
 
-func (d *DBInfo) HandleCreateRecord(ctx context.Context, w http.ResponseWriter, req TableRecordsReq) {
+func (d *DBInfo) HandleCreateRecord(ctx context.Context, w http.ResponseWriter, req TableRecordsReq, body io.ReadCloser) {
+	var bodyMap map[string]interface{}
+	err := json.NewDecoder(body).Decode(&bodyMap)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
+	schema := d.Repo.GetTableSchema(req.TableName)
+
+	cleanBody := make(map[string]interface{})
+	for _, col := range schema.Columns {
+		if col.IsPrimaryKey == "PRI" {
+			continue
+		}
+
+		val, exists := bodyMap[col.Name]
+		if exists {
+			cleanBody[col.Name] = val
+			continue
+		}
+
+		if col.Nullable == "YES" || col.HasDefaultValue.Valid {
+			continue
+		}
+
+		if strings.HasPrefix(schema.ColTypeByName[col.Name], "int") {
+			cleanBody[col.Name] = 0
+		} else {
+			cleanBody[col.Name] = ""
+		}
+	}
+
+	newID, err := d.Repo.CreateTableRecord(ctx, req.TableName, cleanBody)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, ResMap{schema.PrimaryKey: newID})
 }
 
-func (d *DBInfo) HandleUpdateRecord(ctx context.Context, w http.ResponseWriter, req TableRecordsReq) {
+func (d *DBInfo) HandleUpdateRecord(ctx context.Context, w http.ResponseWriter, req TableRecordsReq, body io.ReadCloser) {
+	id, err := strconv.Atoi(req.Id)
+	if err != nil || id <= 0 {
+		writeJSONError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
 
+	var bodyMap map[string]interface{}
+	err = json.NewDecoder(body).Decode(&bodyMap)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	schema := d.Repo.GetTableSchema(req.TableName)
+
+	cleanBody := make(map[string]interface{})
+	for key, val := range bodyMap {
+		var col *Column
+		for i := range schema.Columns {
+			if schema.Columns[i].Name == key {
+				col = &schema.Columns[i]
+				break
+			}
+		}
+
+		if col == nil {
+			continue
+		}
+
+		if col.IsPrimaryKey == "PRI" {
+			writeJSONError(w, http.StatusBadRequest, "field "+key+" have invalid type")
+			return
+		}
+
+		if val == nil {
+			if col.Nullable != "YES" {
+				writeJSONError(w, http.StatusBadRequest, "field "+key+" have invalid type")
+				return
+			}
+			cleanBody[key] = nil
+			continue
+		}
+
+		colType := schema.ColTypeByName[key]
+		isIntCol := strings.HasPrefix(colType, "int")
+
+		switch val.(type) {
+		case float64:
+			if !isIntCol {
+				writeJSONError(w, http.StatusBadRequest, "field "+key+" have invalid type")
+				return
+			}
+			cleanBody[key] = val
+		case string:
+			if isIntCol {
+				writeJSONError(w, http.StatusBadRequest, "field "+key+" have invalid type")
+				return
+			}
+			cleanBody[key] = val
+		default:
+			writeJSONError(w, http.StatusBadRequest, "field "+key+" have invalid type")
+			return
+		}
+	}
+
+	updated, err := d.Repo.UpdateTableRecord(ctx, req.TableName, id, cleanBody)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, ResMap{"updated": updated})
 }
 
 func (d *DBInfo) HandleDeleteRecord(ctx context.Context, w http.ResponseWriter, req TableRecordsReq) {
+	id, err := strconv.Atoi(req.Id)
+	if err != nil || id <= 0 {
+		writeJSONError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
 
+	deleted, err := d.Repo.DeleteTableRecord(ctx, req.TableName, id)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, ResMap{"deleted": deleted})
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
