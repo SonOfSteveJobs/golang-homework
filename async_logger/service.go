@@ -4,7 +4,6 @@ import (
 	context "context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	sync "sync"
 	"time"
@@ -58,16 +57,15 @@ func StartMyMicroservice(ctx context.Context, listenAddr string, ACLData string)
 
 	lis, err := net.Listen("tcp", listenAddr)
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		return fmt.Errorf("failed to listen: %v", err)
 	}
 
 	// для постмана
 	reflection.Register(server)
 
 	go func() {
-		err := server.Serve(lis)
-		if err != nil {
-			log.Fatalf("failed to start server: %v", err)
+		if err := server.Serve(lis); err != nil {
+			fmt.Printf("server serve error: %v", err)
 		}
 	}()
 
@@ -84,21 +82,26 @@ func (s *AdminService) Logging(_ *Nothing, adm Admin_LoggingServer) error {
 
 	mu.Lock()
 	id := s.data.nextID
-	ch := make(chan *Event, 1)
+	ch := make(chan *Event, 10)
 
 	s.data.nextID++
 	s.data.consumersChans[id] = ch
 	mu.Unlock()
 
+	defer func() {
+		mu.Lock()
+		delete(s.data.consumersChans, id)
+		mu.Unlock()
+	}()
+
 	for {
 		select {
 		case <-adm.Context().Done():
-			mu.Lock()
-			delete(s.data.consumersChans, id)
-			mu.Unlock()
 			return nil
 		case event := <-ch:
-			adm.Send(event)
+			if err := adm.Send(event); err != nil {
+				return err
+			}
 		}
 	}
 }
@@ -114,25 +117,30 @@ func (s *AdminService) Statistics(interval *StatInterval, adm Admin_StatisticsSe
 	}
 	mu.Unlock()
 
+	defer func() {
+		mu.Lock()
+		delete(s.data.stats, id)
+		mu.Unlock()
+	}()
+
 	ticker := time.NewTicker(time.Duration(interval.IntervalSeconds) * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-adm.Context().Done():
-			mu.Lock()
-			delete(s.data.stats, id)
-			mu.Unlock()
 			return nil
 		case <-ticker.C:
 			mu.Lock()
 			stat := s.data.stats[id]
-			adm.Send(stat)
 			s.data.stats[id] = &Stat{
 				ByMethod:   make(map[string]uint64),
 				ByConsumer: make(map[string]uint64),
 			}
 			mu.Unlock()
+			if err := adm.Send(stat); err != nil {
+				return err
+			}
 		}
 	}
 }

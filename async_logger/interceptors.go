@@ -12,87 +12,40 @@ import (
 )
 
 func (s *MyMicroserviceData) ACLUnaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	meta, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return nil, status.Errorf(codes.Unauthenticated, "unary: failed to get metadata from context")
+	consumer, err := s.getConsumerFromCtx(ctx)
+	if err != nil {
+		return nil, err
 	}
 
-	fullMethod := info.FullMethod
-
-	consumers := meta.Get("consumer")
-	if len(consumers) == 0 {
-		return nil, status.Errorf(codes.Unauthenticated, "consumer not found")
+	if err := s.aclValidator(consumer, info.FullMethod); err != nil {
+		return nil, err
 	}
-	consumer := consumers[0]
 
 	peer, _ := peer.FromContext(ctx)
 	addr := peer.Addr.String()
 
-	if err := s.aclValidator(consumer, fullMethod); err != nil {
-		return nil, status.Errorf(codes.Unauthenticated, "unary: %v", err)
-	}
-
-	s.statsMu.Lock()
-	for _, value := range s.stats {
-		value.ByConsumer[consumer]++
-		value.ByMethod[fullMethod]++
-	}
-	s.statsMu.Unlock()
-
-	s.chanMu.Lock()
-	for _, ch := range s.consumersChans {
-		ch <- &Event{
-			Consumer: consumer,
-			Method:   info.FullMethod,
-			Host:     addr,
-		}
-	}
-	s.chanMu.Unlock()
+	s.updateStats(consumer, info.FullMethod)
+	s.broadcastEvent(consumer, info.FullMethod, addr)
 
 	return handler(ctx, req)
 }
 
 func (s *MyMicroserviceData) ACLStreamInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo,
 	handler grpc.StreamHandler) error {
-	meta, ok := metadata.FromIncomingContext(ss.Context())
-	if !ok {
-		return status.Errorf(codes.Unauthenticated, "stream: failed to get metadata from context")
+	consumer, err := s.getConsumerFromCtx(ss.Context())
+	if err != nil {
+		return err
 	}
 
-	fullMethod := info.FullMethod
-
-	consumers := meta.Get("consumer")
-	if len(consumers) == 0 {
-		return status.Errorf(codes.Unauthenticated, "consumer not found")
+	if err := s.aclValidator(consumer, info.FullMethod); err != nil {
+		return err
 	}
-	consumer := consumers[0]
-
-	if err := s.aclValidator(consumer, fullMethod); err != nil {
-		return status.Errorf(codes.Unauthenticated, "stream: %v", err)
-	}
-
-	s.statsMu.Lock()
-	for _, value := range s.stats {
-		value.ByConsumer[consumer]++
-		value.ByMethod[fullMethod]++
-	}
-	s.statsMu.Unlock()
 
 	peer, _ := peer.FromContext(ss.Context())
 	addr := peer.Addr.String()
 
-	s.chanMu.Lock()
-	for _, value := range s.consumersChans {
-		select {
-		case value <- &Event{
-			Consumer: consumer,
-			Method:   info.FullMethod,
-			Host:     addr,
-		}:
-		default:
-		}
-	}
-	s.chanMu.Unlock()
+	s.updateStats(consumer, info.FullMethod)
+	s.broadcastEvent(consumer, info.FullMethod, addr)
 
 	return handler(srv, ss)
 }
@@ -121,4 +74,40 @@ func (s *MyMicroserviceData) aclValidator(consumer string, fullMethod string) er
 		return status.Errorf(codes.Unauthenticated, "method not allowed")
 	}
 	return nil
+}
+
+func (s *MyMicroserviceData) getConsumerFromCtx(ctx context.Context) (string, error) {
+	meta, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return "", status.Errorf(codes.Unauthenticated, "no metadata in context")
+	}
+	consumers := meta.Get("consumer")
+	if len(consumers) == 0 {
+		return "", status.Errorf(codes.Unauthenticated, "consumer not found")
+	}
+	return consumers[0], nil
+}
+
+func (s *MyMicroserviceData) broadcastEvent(consumer, fullMethod, addr string) {
+	s.chanMu.Lock()
+	for _, ch := range s.consumersChans {
+		select {
+		case ch <- &Event{
+			Consumer: consumer,
+			Method:   fullMethod,
+			Host:     addr,
+		}:
+		default:
+		}
+	}
+	s.chanMu.Unlock()
+}
+
+func (s *MyMicroserviceData) updateStats(consumer, fullMethod string) {
+	s.statsMu.Lock()
+	for _, value := range s.stats {
+		value.ByConsumer[consumer]++
+		value.ByMethod[fullMethod]++
+	}
+	s.statsMu.Unlock()
 }
