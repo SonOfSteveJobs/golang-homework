@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	sync "sync"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
@@ -24,14 +25,23 @@ type BizService struct {
 type MyMicroserviceData struct {
 	acl            map[string][]string
 	consumersChans map[int]chan *Event
-	nextID         int
 	chanMu         sync.Mutex
+	nextID         int
+	stats          map[int]*Stat
+	nextStatID     int
+	statsMu        sync.Mutex
 }
 
 // тут вы пишете код
 // обращаю ваше внимание - в этом задании запрещены глобальные переменные
 func StartMyMicroservice(ctx context.Context, listenAddr string, ACLData string) error {
-	data := &MyMicroserviceData{consumersChans: make(map[int]chan *Event), chanMu: sync.Mutex{}}
+	data := &MyMicroserviceData{
+		consumersChans: make(map[int]chan *Event),
+		chanMu:         sync.Mutex{},
+		stats:          make(map[int]*Stat),
+		statsMu:        sync.Mutex{},
+	}
+
 	if err := json.Unmarshal([]byte(ACLData), &data.acl); err != nil {
 		return fmt.Errorf("failed to parse ACL data: %v", err)
 	}
@@ -92,8 +102,39 @@ func (s *AdminService) Logging(_ *Nothing, adm Admin_LoggingServer) error {
 		}
 	}
 }
-func (s *AdminService) Statistics(*StatInterval, Admin_StatisticsServer) error {
-	return nil
+func (s *AdminService) Statistics(interval *StatInterval, adm Admin_StatisticsServer) error {
+	mu := &s.data.statsMu
+
+	mu.Lock()
+	id := s.data.nextStatID
+	s.data.nextStatID++
+	s.data.stats[id] = &Stat{
+		ByMethod:   make(map[string]uint64),
+		ByConsumer: make(map[string]uint64),
+	}
+	mu.Unlock()
+
+	ticker := time.NewTicker(time.Duration(interval.IntervalSeconds) * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-adm.Context().Done():
+			mu.Lock()
+			delete(s.data.stats, id)
+			mu.Unlock()
+			return nil
+		case <-ticker.C:
+			mu.Lock()
+			stat := s.data.stats[id]
+			adm.Send(stat)
+			s.data.stats[id] = &Stat{
+				ByMethod:   make(map[string]uint64),
+				ByConsumer: make(map[string]uint64),
+			}
+			mu.Unlock()
+		}
+	}
 }
 
 func (*BizService) Check(context.Context, *Nothing) (*Nothing, error) {

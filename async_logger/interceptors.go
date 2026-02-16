@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"google.golang.org/grpc"
@@ -15,28 +14,41 @@ import (
 func (s *MyMicroserviceData) ACLUnaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	meta, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return nil, fmt.Errorf("unary: failed to get metadata from context")
+		return nil, status.Errorf(codes.Unauthenticated, "unary: failed to get metadata from context")
 	}
 
 	fullMethod := info.FullMethod
-	consumer := meta.Get("consumer")[0]
+
+	consumers := meta.Get("consumer")
+	if len(consumers) == 0 {
+		return nil, status.Errorf(codes.Unauthenticated, "consumer not found")
+	}
+	consumer := consumers[0]
 
 	peer, _ := peer.FromContext(ctx)
 	addr := peer.Addr.String()
 
 	if err := s.aclValidator(consumer, fullMethod); err != nil {
-		return nil, fmt.Errorf("unary: %w", err)
+		return nil, status.Errorf(codes.Unauthenticated, "unary: %v", err)
 	}
 
+	s.statsMu.Lock()
+	for _, value := range s.stats {
+		value.ByConsumer[consumer]++
+		value.ByMethod[fullMethod]++
+	}
+	s.statsMu.Unlock()
+
 	s.chanMu.Lock()
-	for _, value := range s.consumersChans {
-		value <- &Event{
+	for _, ch := range s.consumersChans {
+		ch <- &Event{
 			Consumer: consumer,
 			Method:   info.FullMethod,
 			Host:     addr,
 		}
 	}
 	s.chanMu.Unlock()
+
 	return handler(ctx, req)
 }
 
@@ -48,11 +60,23 @@ func (s *MyMicroserviceData) ACLStreamInterceptor(srv interface{}, ss grpc.Serve
 	}
 
 	fullMethod := info.FullMethod
-	consumer := meta.Get("consumer")[0]
+
+	consumers := meta.Get("consumer")
+	if len(consumers) == 0 {
+		return status.Errorf(codes.Unauthenticated, "consumer not found")
+	}
+	consumer := consumers[0]
 
 	if err := s.aclValidator(consumer, fullMethod); err != nil {
-		return fmt.Errorf("stream: %w", err)
+		return status.Errorf(codes.Unauthenticated, "stream: %v", err)
 	}
+
+	s.statsMu.Lock()
+	for _, value := range s.stats {
+		value.ByConsumer[consumer]++
+		value.ByMethod[fullMethod]++
+	}
+	s.statsMu.Unlock()
 
 	peer, _ := peer.FromContext(ss.Context())
 	addr := peer.Addr.String()
