@@ -6,17 +6,15 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"strings"
+	sync "sync"
 
 	"google.golang.org/grpc"
-	codes "google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
-	status "google.golang.org/grpc/status"
 )
 
 type AdminService struct {
 	UnimplementedAdminServer
+	data *MyMicroserviceData
 }
 
 type BizService struct {
@@ -24,20 +22,27 @@ type BizService struct {
 }
 
 type MyMicroserviceData struct {
-	acl map[string][]string
+	acl            map[string][]string
+	consumersChans map[int]chan *Event
+	nextID         int
+	chanMu         sync.Mutex
 }
 
 // тут вы пишете код
 // обращаю ваше внимание - в этом задании запрещены глобальные переменные
 func StartMyMicroservice(ctx context.Context, listenAddr string, ACLData string) error {
-	data := &MyMicroserviceData{}
+	data := &MyMicroserviceData{consumersChans: make(map[int]chan *Event), chanMu: sync.Mutex{}}
 	if err := json.Unmarshal([]byte(ACLData), &data.acl); err != nil {
 		return fmt.Errorf("failed to parse ACL data: %v", err)
 	}
-	server := grpc.NewServer(grpc.UnaryInterceptor(data.ACLUnaryInterceptor), grpc.StreamInterceptor(data.ACLStreamInterceptor))
-	adminService := &AdminService{}
-	bizService := &BizService{}
 
+	server := grpc.NewServer(
+		grpc.UnaryInterceptor(data.ACLUnaryInterceptor),
+		grpc.StreamInterceptor(data.ACLStreamInterceptor),
+	)
+
+	adminService := &AdminService{data: data}
+	bizService := &BizService{}
 	RegisterAdminServer(server, adminService)
 	RegisterBizServer(server, bizService)
 
@@ -46,6 +51,7 @@ func StartMyMicroservice(ctx context.Context, listenAddr string, ACLData string)
 		log.Fatalf("failed to listen: %v", err)
 	}
 
+	// для постмана
 	reflection.Register(server)
 
 	go func() {
@@ -63,39 +69,31 @@ func StartMyMicroservice(ctx context.Context, listenAddr string, ACLData string)
 	return nil
 }
 
-func (s *MyMicroserviceData) ACLUnaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	fmt.Printf("ACL interceptor \n ctx: %v\n, req: %v \n, info: %v \n, handler: %v \n", ctx, req, info, handler)
-	meta, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return nil, fmt.Errorf("failed to get metadata from context")
-	}
-	fmt.Printf("consumer: %v", meta.Get("consumer"))
+func (s *AdminService) Logging(_ *Nothing, adm Admin_LoggingServer) error {
+	mu := &s.data.chanMu
 
-	consumer := meta.Get("consumer")
-	if consumer == nil {
-		return nil, status.Errorf(codes.Unauthenticated, "consumer not found")
-	}
+	mu.Lock()
+	id := s.data.nextID
+	ch := make(chan *Event, 1)
 
-	if _, ok := (s.acl)[consumer[0]]; !ok {
-		return nil, status.Errorf(codes.Unauthenticated, "consumer not found in ACL")
-	}
+	s.data.nextID++
+	s.data.consumersChans[id] = ch
+	mu.Unlock()
 
-	allowed := false
-	for _, method := range s.acl[consumer[0]] {
-		if strings.HasSuffix(method, "/*") {
-			allowed = strings.HasPrefix(info.FullMethod, strings.TrimSuffix(method, "*"))
-			break
-		}
-		if method == info.FullMethod {
-			allowed = true
-			break
+	for {
+		select {
+		case <-adm.Context().Done():
+			mu.Lock()
+			delete(s.data.consumersChans, id)
+			mu.Unlock()
+			return nil
+		case event := <-ch:
+			adm.Send(event)
 		}
 	}
-	if !allowed {
-		return nil, status.Errorf(codes.Unauthenticated, "method not allowed")
-	}
-
-	return handler(ctx, req)
+}
+func (s *AdminService) Statistics(*StatInterval, Admin_StatisticsServer) error {
+	return nil
 }
 
 func (*BizService) Check(context.Context, *Nothing) (*Nothing, error) {
@@ -106,45 +104,4 @@ func (*BizService) Add(context.Context, *Nothing) (*Nothing, error) {
 }
 func (*BizService) Test(context.Context, *Nothing) (*Nothing, error) {
 	return &Nothing{}, nil
-}
-
-func (s *MyMicroserviceData) ACLStreamInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo,
-	handler grpc.StreamHandler) error {
-	meta, ok := metadata.FromIncomingContext(ss.Context())
-	if !ok {
-		return status.Errorf(codes.Unauthenticated, "no metadata")
-	}
-
-	consumer := meta.Get("consumer")
-	if consumer == nil {
-		return status.Errorf(codes.Unauthenticated, "consumer not found")
-	}
-
-	if _, ok := (s.acl)[consumer[0]]; !ok {
-		return status.Errorf(codes.Unauthenticated, "consumer not found in ACL")
-	}
-
-	allowed := false
-	for _, method := range s.acl[consumer[0]] {
-		if strings.HasSuffix(method, "/*") {
-			allowed = strings.HasPrefix(info.FullMethod, strings.TrimSuffix(method, "*"))
-			break
-		}
-		if method == info.FullMethod {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
-		return status.Errorf(codes.Unauthenticated, "method not allowed")
-	}
-
-	return handler(srv, ss)
-}
-
-func (s *AdminService) Logging(*Nothing, Admin_LoggingServer) error {
-	return nil
-}
-func (s *AdminService) Statistics(*StatInterval, Admin_StatisticsServer) error {
-	return nil
 }
